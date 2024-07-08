@@ -15,12 +15,12 @@ SEARCH_ENGINE_ID = os.getenv('Search_Engine_ID')
 Weather_API_KEY = os.getenv('Weather_API_Key')
 
 def run_bot():
-#Setup
     intents = discord.Intents.default()
     intents.message_content = True
     client = discord.Client(intents=intents)
 
     voice_clients = {}
+    appointments = []  # Lưu trữ các lịch hẹn
     yt_dl_options = {"format": "bestaudio/best"}
     ytdl = yt_dlp.YoutubeDL(yt_dl_options)
 
@@ -33,10 +33,8 @@ def run_bot():
     async def on_ready():
         print(f'{client.user} đã kết nối Discord!')
 
-    # Các chức năng của bot
     @client.event
     async def on_message(message):
-        # Hiển thị các chức năng hiện có: ?help
         if message.content.startswith("?help"):
             help_message = (
                 "Các chức năng hiện có:\n"
@@ -48,10 +46,11 @@ def run_bot():
                 "?dungnhac - Dừng phát nhạc.\n"
                 "?ngaygio - Hiển thị ngày giờ hiện tại.\n"
                 "?dich [Nội dung cần dịch] - Dịch tự động sang tiếng Việt.\n"
+                "?taolichhen [ngày giờ] [nội dung] - Tạo lịch hẹn mới.\n"
+                "?lichhen - Hiển thị các lịch hẹn đã tạo.\n"
             )
             await message.channel.send(help_message)
 
-        # Thiết lập cho bot vào kênh: ?vao
         if message.content.startswith("?vao"):
             try:
                 voice_client = await message.author.voice.channel.connect()
@@ -60,7 +59,6 @@ def run_bot():
             except Exception as e:
                 print(e)
 
-        # Thiết lập cho bot thoát kênh: ?thoat
         if message.content.startswith("?thoat"):
             try:
                 await voice_clients[message.guild.id].disconnect()
@@ -68,7 +66,6 @@ def run_bot():
             except Exception as e:
                 print(e)
 
-        # Thiết lập chức năng tìm kiếm hình ảnh theo google: ?timhinhanh [Tìm kiếm của bạn]
         if message.content.startswith("?timhinhanh"):
             try:
                 query = message.content[len("?timhinhanh "):].strip()
@@ -78,7 +75,7 @@ def run_bot():
                     "cx": SEARCH_ENGINE_ID,
                     "q": query,
                     "searchType": "image",
-                    "num": 1 
+                    "num": 1
                 }
 
                 response = requests.get(search_url, params=params)
@@ -95,12 +92,11 @@ def run_bot():
                 await message.channel.send(f"Có lỗi xảy ra: {e}")
                 print(e)
 
-        # Thiết lập chức năng dự báo thời tiết: ?dubaothoitiet [Tên thành phố]
         if message.content.startswith("?dubaothoitiet"):
             try:
-                city = message.content[len("!dubaothoitiet "):].strip()
+                city = message.content[len("?dubaothoitiet "):].strip()
                 weather_url = f"http://api.openweathermap.org/data/2.5/weather?q={city}&appid={Weather_API_KEY}&units=metric&lang=vi"
-                
+
                 response = requests.get(weather_url)
                 weather_data = response.json()
 
@@ -125,7 +121,6 @@ def run_bot():
                 await message.channel.send(f"Có lỗi xảy ra: {e}")
                 print(e)
 
-        # Thiết lập chức năng phát nhạc: ?phatnhac [Link youtube]
         if message.content.startswith("?phatnhac"):
             try:
                 url = message.content.split()[1]
@@ -142,7 +137,6 @@ def run_bot():
             except Exception as e:
                 print(e)
 
-        # Thiết lập chức năng dừng nhạc: ?dungnhac
         if message.content.startswith("?dungnhac"):
             try:
                 voice_clients[message.guild.id].stop()
@@ -151,13 +145,11 @@ def run_bot():
                 await message.channel.send("Không có bài nhạc nào đang được phát.")
                 print(e)
 
-        # Thiết lập chức năng hiển thị ngày giờ: ?ngaygio
         if message.content.startswith("?ngaygio"):
             now = datetime.datetime.now()
             current_time = now.strftime("%H:%M:%S - %d/%m/%Y")
             await message.channel.send(f"Bây giờ là {current_time}")
 
-        # Thiết lập chức năng dịch tự động: ?dich [Nội dung cần dịch]
         if message.content.startswith("?dich"):
             try:
                 text_to_translate = message.content[len("?dich "):].strip()
@@ -167,6 +159,54 @@ def run_bot():
             except Exception as e:
                 await message.channel.send(f"Có lỗi xảy ra khi dịch: {e}")
                 print(e)
+
+        if message.content.startswith("?taolichhen"):
+            try:
+                command = message.content.split()
+                if len(command) < 3:
+                    await message.channel.send("Thiếu thông tin ngày giờ hoặc nội dung lịch hẹn.")
+                    return
+
+                appointment_time = command[1] + " " + command[2]
+                appointment_content = " ".join(command[3:])
+
+                try:
+                    appointment_datetime = datetime.datetime.strptime(appointment_time, "%d/%m/%Y %H:%M")
+                    appointments.append((appointment_datetime, appointment_content))
+                    appointments.sort(key=lambda x: x[0])
+                    await message.channel.send(f"Tạo lịch hẹn thành công:\nThời gian: {appointment_datetime.strftime('%H:%M %d/%m/%Y')}\nNội dung: {appointment_content}")
+                except ValueError:
+                    await message.channel.send("Định dạng ngày giờ không hợp lệ. Vui lòng nhập theo định dạng 'dd/mm/yyyy hh:mm'.")
+                
+                # Kiểm tra lịch hẹn ngay sau khi tạo
+                await check_appointments()
+            except Exception as e:
+                await message.channel.send(f"Lỗi: {e}")
+                print(e)
+
+        if message.content.startswith("?lichhen"):
+            if appointments:
+                appointment_list = "\n".join([f"Thời gian: {appt[0].strftime('%H:%M %d/%m/%Y')} - Nội dung: {appt[1]}" for appt in appointments])
+                await message.channel.send(f"Các lịch hẹn đã tạo:\n{appointment_list}")
+            else:
+                await message.channel.send("Không có lịch hẹn nào.")
+
+    async def check_appointments():
+        channel_id = 1258761811436638262
+
+        while True:
+            now = datetime.datetime.now()
+            for appointment in appointments[:]:
+                appt_time, appt_content = appointment
+                if now >= appt_time:
+                    channel = client.get_channel(1258761811436638262)
+                    if channel:
+                        await channel.send(f"Đã đến giờ: {appt_content}\n")
+                    else:
+                        print(f"Không tìm thấy channel có ID {channel_id}")
+
+                    appointments.remove(appointment)
+        await asyncio.sleep(5)
 
     client.run(TOKEN)
 
